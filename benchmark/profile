@@ -1,0 +1,106 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'bundler/setup'
+require 'lmdb_store'
+require 'pry'
+
+# Customize these things
+DURATION = 5
+NUM_WORKERS = 8
+UPDATE_SLEEP = 0.001
+
+class Worker
+  class Result
+    attr_accessor :count, :duration
+    attr_reader :worker_num
+
+    def initialize(worker_num)
+      @count = 0
+      @worker_num = worker_num
+    end
+
+    def increment_count
+      @count = @count + 1
+    end
+
+    def to_s
+      "worker: #{worker_num}\tduration: #{format("%.4f", duration)}\tread_count: #{count}"
+    end
+  end
+
+  @worker_count = 0
+  class <<self
+    attr_accessor :worker_count
+  end
+
+  def initialize(path, duration)
+    @path = path
+    @duration = duration
+    @rd, @wr = IO.pipe
+    @worker_num = self.class.worker_count
+    self.class.worker_count += 1
+  end
+
+  def start
+    fork do
+      @cache = LmdbStore.new(@path)
+      @rd.close
+      work
+      @wr.write Marshal.dump(work)
+      @wr.close
+    end
+
+    @wr.close
+  end
+
+  def result
+    result = Marshal.load(@rd.read)
+    @rd.close
+    result
+  end
+
+  private
+
+  def work
+    result = Result.new(@worker_num)
+    start = Time.now.to_f
+    while Time.now.to_f < (start + @duration) do
+      @cache.read('foo')
+      result.increment_count
+    end
+
+    result.duration = Time.now.to_f - start
+    result
+  end
+end
+
+path ||= File.join(File.dirname(__FILE__), '..', 'tmp', 'profile')
+FileUtils.mkdir_p(path)
+
+cache = LmdbStore.new(path)
+workers = []
+NUM_WORKERS.times { workers << Worker.new(path, DURATION) }
+
+workers.each(&:start)
+
+count = 1
+start = Time.now.to_f
+while Time.now.to_f < (start + DURATION) do
+  cache.write('foo', count.to_s)
+  cache.read('foo')
+  count += 1
+  sleep UPDATE_SLEEP
+end
+
+total_reads = 0
+workers.each do |worker|
+  r = worker.result
+  total_reads += r.count
+  puts r.to_s
+end
+
+puts "\nlmdb_store updates:\t#{cache.read('foo')}"
+puts "lmdb_store reads:\t#{total_reads} (#{total_reads / DURATION}/s)"
+
+Process.waitall
