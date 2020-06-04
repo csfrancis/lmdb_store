@@ -15,7 +15,7 @@ Gem::Specification.new do |s|
   s.add_runtime_dependency 'activesupport', ' >= 5'
   s.add_runtime_dependency 'lmdb', ' >= 0.5'
 
-  s.add_development_dependency 'rake', '~> 10.0'
+  s.add_development_dependency 'rake', '~> 12.3'
   s.add_development_dependency 'minitest', '~> 5.0'
   s.add_development_dependency 'pry', '~> 0.12.2'
 end
